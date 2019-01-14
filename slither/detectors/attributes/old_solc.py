@@ -28,7 +28,7 @@ class OldSolc(AbstractDetector):
         old_pragma = sorted([p for p in pragma if self._convert_pragma(p.version) not in ['0.5.1', '0.5.2']], key=lambda x:str(x))
 
         if old_pragma:
-            info = "Old version (<0.4.23) of Solidity used in {}:\n".format(self.filename)
+            info = "Old version (<0.5.0) of Solidity used in {}:\n".format(self.filename)
             for p in old_pragma:
                 info += "\t- {} declares {}\n".format(p.source_mapping_str, str(p))
             self.log(info)
