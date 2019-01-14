@@ -25,7 +25,7 @@ class OldSolc(AbstractDetector):
     def detect(self):
         results = []
         pragma = self.slither.pragma_directives
-        old_pragma = sorted([p for p in pragma if self._convert_pragma(p.version) not in ['0.5.1']], key=lambda x:str(x))
+        old_pragma = sorted([p for p in pragma if self._convert_pragma(p.version) not in ['0.5.1', '0.5.2']], key=lambda x:str(x))
 
         if old_pragma:
             info = "Old version (<0.4.23) of Solidity used in {}:\n".format(self.filename)
