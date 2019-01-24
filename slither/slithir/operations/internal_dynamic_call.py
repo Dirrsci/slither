@@ -11,7 +11,7 @@ class InternalDynamicCall(Call, OperationWithLValue):
     def __init__(self, lvalue, function, function_type):
         assert isinstance(function_type, FunctionType)
         assert isinstance(function, Variable)
-        assert is_valid_lvalue(lvalue)
+        assert is_valid_lvalue(lvalue) or lvalue is None
         super(InternalDynamicCall, self).__init__()
         self._function = function
         self._function_type = function_type
@@ -19,17 +19,7 @@ class InternalDynamicCall(Call, OperationWithLValue):
 
     @property
     def read(self):
-        # if array inside the parameters
-        def unroll(l):
-            ret = []
-            for x in l:
-                if not isinstance(x, list):
-                    ret += [x]
-                else:
-                    ret += unroll(x)
-            return ret
-
-        return unroll(self.arguments) + [self.function]
+        return self._unroll(self.arguments) + [self.function]
 
     @property
     def function(self):

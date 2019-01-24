@@ -31,6 +31,8 @@ class Contract(ChildSlither, SourceMapping):
         self._kind = None
 
 
+        self._initial_state_variables = [] # ssa
+
     def __eq__(self, other):
         if isinstance(other, str):
             return other == self.name
@@ -69,6 +71,14 @@ class Contract(ChildSlither, SourceMapping):
         self._inheritance = inheritance
 
     @property
+    def derived_contracts(self):
+        '''
+            list(Contract): Return the list of contracts derived from self
+        '''
+        candidates = self.slither.contracts
+        return [c for c in candidates if self in c.inheritance]
+
+    @property
     def structures(self):
         '''
             list(Structure): List of the structures
@@ -85,12 +95,6 @@ class Contract(ChildSlither, SourceMapping):
     def enums_as_dict(self):
         return self._enums
 
-    @property
-    def modifiers(self):
-        '''
-            list(Modifier): List of the modifiers
-        '''
-        return list(self._modifiers.values())
 
     def modifiers_as_dict(self):
         return self._modifiers
@@ -114,11 +118,80 @@ class Contract(ChildSlither, SourceMapping):
         return [f for f in self.functions if f.contract != self]
 
     @property
+    def functions_not_inherited(self):
+        '''
+            list(Function): List of the functions defined within the contract (not inherited)
+        '''
+        return [f for f in self.functions if f.contract == self]
+
+    @property
+    def functions_entry_points(self):
+        '''
+            list(Functions): List of public and external functions
+        '''
+        return [f for f in self.functions if f.visibility in ['public', 'external']]
+
+    @property
+    def modifiers(self):
+        '''
+            list(Modifier): List of the modifiers
+        '''
+        return list(self._modifiers.values())
+
+    @property
+    def modifiers_inherited(self):
+        '''
+            list(Modifier): List of the inherited modifiers
+        '''
+        return [m for m in self.modifiers if m.contract != self]
+
+    @property
+    def modifiers_not_inherited(self):
+        '''
+            list(Modifier): List of the modifiers defined within the contract (not inherited)
+        '''
+        return [m for m in self.modifiers if m.contract == self]
+
+    @property
+    def functions_and_modifiers(self):
+        '''
+            list(Function|Modifier): List of the functions and modifiers
+        '''
+        return self.functions + self.modifiers
+
+    @property
+    def functions_and_modifiers_inherited(self):
+        '''
+            list(Function|Modifier): List of the inherited functions and modifiers
+        '''
+        return self.functions_inherited + self.modifiers_inherited
+
+    @property
+    def functions_and_modifiers_not_inherited(self):
+        '''
+            list(Function|Modifier): List of the functions and modifiers defined within the contract (not inherited)
+        '''
+        return self.functions_not_inherited + self.modifiers_not_inherited
+
+    def get_functions_overridden_by(self, function):
+        '''
+            Return the list of functions overriden by the function
+        Args:
+            (core.Function)
+        Returns:
+            list(core.Function)
+
+        '''
+        candidates = [c.functions_not_inherited for c in self.inheritance]
+        candidates = [candidate for sublist in candidates for candidate in sublist]
+        return [f for f in candidates if f.full_name == function.full_name]
+
+    @property
     def all_functions_called(self):
         '''
             list(Function): List of functions reachable from the contract (include super)
         '''
-        all_calls = (f.all_internal_calls() for f in self.functions)
+        all_calls = [f.all_internal_calls() for f in self.functions + self.modifiers] + [self.functions + self.modifiers]
         all_calls = [item for sublist in all_calls for item in sublist] + self.functions
         all_calls = list(set(all_calls))
 
@@ -128,6 +201,32 @@ class Contract(ChildSlither, SourceMapping):
         all_calls = set(all_calls+all_constructors)
 
         return [c for c in all_calls if isinstance(c, Function)]
+
+    @property
+    def all_state_variables_written(self):
+        '''
+            list(StateVariable): List all of the state variables written
+        '''
+        all_state_variables_written = [f.all_state_variables_written() for f in self.functions + self.modifiers]
+        all_state_variables_written = [item for sublist in all_state_variables_written for item in sublist]
+        return list(set(all_state_variables_written))
+    @property
+    def all_state_variables_read(self):
+        '''
+            list(StateVariable): List all of the state variables read
+        '''
+        all_state_variables_read = [f.all_state_variables_read() for f in self.functions + self.modifiers]
+        all_state_variables_read = [item for sublist in all_state_variables_read for item in sublist]
+        return list(set(all_state_variables_read))
+
+    @property
+    def slithir_variables(self):
+        '''
+            List all of the slithir variables (non SSA)
+        '''
+        slithir_variables = [f.slithir_variables for f in self.functions + self.modifiers]
+        slithir_variables = [item for sublist in slithir_variables for item in sublist]
+        return list(set(slithir_variables))
 
     def functions_as_dict(self):
         return self._functions
@@ -309,6 +408,10 @@ class Contract(ChildSlither, SourceMapping):
         return 'transfer(address,uint256)' in full_names and\
                'transferFrom(address,address,uint256)' in full_names and\
                'approve(address,uint256)' in full_names
+
+    def update_read_write_using_ssa(self):
+        for function in self.functions + self.modifiers:
+            function.update_read_write_using_ssa()
 
     def get_summary(self):
         """ Return the function summary

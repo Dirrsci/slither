@@ -35,8 +35,11 @@ class Function(ChildContract, SourceMapping):
         self._entry_point = None
         self._nodes = []
         self._variables = {}
+        self._slithir_variables = set() # slithir Temporary and references variables (but not SSA)
         self._parameters = []
+        self._parameters_ssa = []
         self._returns = []
+        self._returns_ssa = []
         self._vars_read = []
         self._vars_written = []
         self._state_vars_read = []
@@ -63,13 +66,21 @@ class Function(ChildContract, SourceMapping):
     @property
     def return_type(self):
         """
-            Return the list of return type 
+            Return the list of return type
             If no return, return None
         """
         returns = self.returns
         if returns:
             return [r.type for r in returns]
         return None
+
+    @property
+    def type(self):
+        """
+            Return the list of return type
+            If no return, return None
+        """
+        return self.return_type
 
     @property
     def name(self):
@@ -154,11 +165,31 @@ class Function(ChildContract, SourceMapping):
         return list(self._parameters)
 
     @property
+    def parameters_ssa(self):
+        """
+            list(LocalIRVariable): List of the parameters (SSA form)
+        """
+        return list(self._parameters_ssa)
+
+    def add_parameter_ssa(self, var):
+        self._parameters_ssa.append(var)
+
+    @property
     def returns(self):
         """
             list(LocalVariable): List of the return variables
         """
         return list(self._returns)
+
+    @property
+    def returns_ssa(self):
+        """
+            list(LocalIRVariable): List of the return variables (SSA form)
+        """
+        return list(self._returns_ssa)
+
+    def add_return_ssa(self, var):
+        self._returns_ssa.append(var)
 
     @property
     def modifiers(self):
@@ -237,6 +268,14 @@ class Function(ChildContract, SourceMapping):
     @property
     def variables_written_as_expression(self):
         return self._expression_vars_written
+
+    @property 
+    def slithir_variables(self):
+        '''
+            Temporary and Reference Variables (not SSA form)
+        '''
+
+        return list(self._slithir_variables)
 
     @property
     def internal_calls(self):
@@ -319,6 +358,18 @@ class Function(ChildContract, SourceMapping):
         name, parameters, _ = self.signature
         return name+'('+','.join(parameters)+')'
 
+    @property
+    def functions_shadowed(self):
+        '''
+            Return the list of functions shadowed
+        Returns:
+            list(core.Function)
+
+        '''
+        candidates = [c.functions_not_inherited for c in self.contract.inheritance]
+        candidates = [candidate for sublist in candidates for candidate in sublist]
+        return [f for f in candidates if f.full_name == self.full_name]
+
 
     @property
     def slither(self):
@@ -382,6 +433,10 @@ class Function(ChildContract, SourceMapping):
                                     isinstance(x, (SolidityVariable))]
 
         self._vars_read_or_written = self._vars_written + self._vars_read
+
+        slithir_variables = [x.slithir_variables for x in self.nodes]
+        slithir_variables = [x for x in slithir_variables if x]
+        self._slithir_variables = [item for sublist in slithir_variables for item in sublist]
 
     def _analyze_calls(self):
         calls = [x.calls_as_expression for x in self.nodes]
@@ -473,7 +528,7 @@ class Function(ChildContract, SourceMapping):
         """
         return self._explore_functions(lambda x: x.internal_calls)
 
-    def all_conditional_state_variables_read(self):
+    def all_conditional_state_variables_read(self, include_loop=True):
         """
             Return the state variable used in a condition
 
@@ -481,11 +536,11 @@ class Function(ChildContract, SourceMapping):
             It won't work if the variable is assigned to a temp variable
         """
         def _explore_func(func):
-            ret = [n.state_variables_read for n in func.nodes if n.is_conditional()]
+            ret = [n.state_variables_read for n in func.nodes if n.is_conditional(include_loop)]
             return [item for sublist in ret for item in sublist]
         return self._explore_functions(lambda x: _explore_func(x))
 
-    def all_conditional_solidity_variables_read(self):
+    def all_conditional_solidity_variables_read(self, include_loop=True):
         """
             Return the Soldiity variables directly used in a condtion
 
@@ -501,7 +556,7 @@ class Function(ChildContract, SourceMapping):
                     ret += ir.read
             return [var for var in ret if isinstance(var, SolidityVariable)]
         def _explore_func(func, f):
-            ret = [f(n) for n in func.nodes if n.is_conditional()]
+            ret = [f(n) for n in func.nodes if n.is_conditional(include_loop)]
             return [item for sublist in ret for item in sublist]
         return self._explore_functions(lambda x: _explore_func(x, _solidity_variable_in_node))
 
@@ -606,13 +661,35 @@ class Function(ChildContract, SourceMapping):
         with open(filename, 'w') as f:
             f.write('digraph{\n')
             for node in self.nodes:
-                label = 'Node Type: {}\n'.format(NodeType.str(node.type))
+                label = 'Node Type: {} {}\n'.format(NodeType.str(node.type), node.node_id)
                 if node.expression:
                     label += '\nEXPRESSION:\n{}\n'.format(node.expression)
+                if node.irs:
                     label += '\nIRs:\n' + '\n'.join([str(ir) for ir in node.irs])
                 f.write('{}[label="{}"];\n'.format(node.node_id, label))
                 for son in node.sons:
                     f.write('{}->{};\n'.format(node.node_id, son.node_id))
+
+            f.write("}\n")
+
+    def dominator_tree_to_dot(self, filename):
+        """
+            Export the dominator tree of the function to a dot file
+        Args:
+            filename (str)
+        """
+        def description(node):
+            desc ='{}\n'.format(node)
+            desc += 'id: {}'.format(node.node_id)
+            if node.dominance_frontier:
+                desc += '\ndominance frontier: {}'.format([n.node_id for n in node.dominance_frontier])
+            return desc
+        with open(filename, 'w') as f:
+            f.write('digraph{\n')
+            for node in self.nodes:
+                f.write('{}[label="{}"];\n'.format(node.node_id, description(node)))
+                if node.immediate_dominator:
+                    f.write('{}->{};\n'.format(node.immediate_dominator.node_id, node.node_id))
 
             f.write("}\n")
 
@@ -644,6 +721,16 @@ class Function(ChildContract, SourceMapping):
 
         if self.is_constructor:
             return True
-        conditional_vars = self.all_conditional_solidity_variables_read()
+        conditional_vars = self.all_conditional_solidity_variables_read(include_loop=False)
         args_vars = self.all_solidity_variables_used_as_args()
         return SolidityVariableComposed('msg.sender') in conditional_vars + args_vars
+
+    def get_local_variable_from_name(self, variable_name):
+        """
+            Return a local variable from a name
+        Args:
+            varible_name (str): name of the variable
+        Returns:
+            LocalVariable
+        """
+        return next((v for v in self.variables if v.name == variable_name), None)

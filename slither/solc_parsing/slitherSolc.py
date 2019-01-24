@@ -9,6 +9,9 @@ from slither.solc_parsing.declarations.contract import ContractSolc04
 from slither.core.slither_core import Slither
 from slither.core.declarations.pragma_directive import Pragma
 from slither.core.declarations.import_directive import Import
+from slither.analyses.data_dependency.data_dependency import compute_dependency
+
+from slither.utils.colors import red
 
 class SlitherSolc(Slither):
 
@@ -157,11 +160,18 @@ class SlitherSolc(Slither):
         for contract in self._contractsNotParsed:
             # remove the first elem in linearizedBaseContracts as it is the contract itself
             fathers = []
-            for i in contract.linearizedBaseContracts[1:]:
-                if i in contract.remapping:
-                    fathers.append(self.get_contract_from_name(contract.remapping[i]))
-                else:
-                    fathers.append(self._contracts_by_id[i])
+            try:
+                for i in contract.linearizedBaseContracts[1:]:
+                    if i in contract.remapping:
+                        fathers.append(self.get_contract_from_name(contract.remapping[i]))
+                    else:
+                        fathers.append(self._contracts_by_id[i])
+            except KeyError:
+                logger.error(red('A contract was not found, it is likely that your codebase contains muliple contracts with the same name'))
+                logger.error(red('Truffle does not handle this case during compilation'))
+                logger.error(red('Please read https://github.com/trailofbits/slither/wiki#keyerror-or-nonetype-error'))
+                logger.error(red('And update your code to remove the duplicate'))
+                exit(-1)
             contract.setInheritance(fathers)
 
         contracts_to_be_analyzed = self.contracts
@@ -189,6 +199,8 @@ class SlitherSolc(Slither):
         self._analyzed = True
 
         self._convert_to_slithir()
+
+        compute_dependency(self)
 
     # TODO refactor the following functions, and use a lambda function
 
@@ -312,6 +324,9 @@ class SlitherSolc(Slither):
 
     def _convert_to_slithir(self):
         for contract in self.contracts:
-            for func in contract.functions + contract.modifiers:
-                if func.contract == contract:
-                    func.convert_expression_to_slithir()
+            contract.convert_expression_to_slithir()
+        for contract in self.contracts:
+            contract.fix_phi()
+            contract.update_read_write_using_ssa()
+
+        

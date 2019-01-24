@@ -13,7 +13,7 @@ class HighLevelCall(Call, OperationWithLValue):
 
     def __init__(self, destination, function_name, nbr_arguments, result, type_call):
         assert isinstance(function_name, Constant)
-        assert is_valid_lvalue(result)
+        assert is_valid_lvalue(result) or result is None
         self._check_destination(destination)
         super(HighLevelCall, self).__init__()
         self._destination = destination
@@ -58,18 +58,9 @@ class HighLevelCall(Call, OperationWithLValue):
 
     @property
     def read(self):
-        # if array inside the parameters
-        def unroll(l):
-            ret = []
-            for x in l:
-                if not isinstance(x, list):
-                    ret += [x]
-                else:
-                    ret += unroll(x)
-            return ret
-        all_read = [self.destination, self.call_gas, self.call_value] + unroll(self.arguments)
+        all_read = [self.destination, self.call_gas, self.call_value] + self._unroll(self.arguments)
         # remove None
-        return [x for x in all_read if x]
+        return [x for x in all_read if x] + [self.destination]
 
     @property
     def destination(self):
